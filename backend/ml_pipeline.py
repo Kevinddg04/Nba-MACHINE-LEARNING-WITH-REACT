@@ -472,16 +472,7 @@ class NBAPredictor:
         prob1_raw = float(self.clf.predict_proba(X1)[0][1])
         prob2_raw = float(self.clf.predict_proba(X2)[0][1])
 
-        # Normalizar para enfrentar la fuerza relativa de ambos
-        total_prob = prob1_raw + prob2_raw
-        if total_prob == 0:
-            prob1, prob2 = 0.5, 0.5
-        else:
-            prob1 = prob1_raw / total_prob
-            prob2 = prob2_raw / total_prob
-
-        # Regresor: puntaje proyectado
-        # Usamos features ATT_/DEF_ si están disponibles, sino estimamos
+        # Regresor: puntaje proyectado (Estimación base)
         score1_raw = float(t1.get("expectedTeamScore", 110))
         score2_raw = float(t2.get("expectedTeamScore", 110))
 
@@ -489,6 +480,25 @@ class NBAPredictor:
             score1_raw += 2.5
         elif home_team == "team2":
             score2_raw += 2.5
+
+        # Normalización matemática: Fórmula Log5 de Bill James para enfrentamientos
+        p1 = prob1_raw
+        p2 = prob2_raw
+        denom = p1 + p2 - 2 * p1 * p2
+        if denom == 0:
+            log5_prob1 = 0.5
+        else:
+            log5_prob1 = (p1 - p1 * p2) / denom
+
+        # Probabilidad implícita por el margen de puntos (Método Vegas/Elo)
+        # En la NBA, ~13.5 pts de ventaja implican un 90% de probabilidad de ganar
+        spread = score1_raw - score2_raw
+        import math
+        spread_prob1 = 1.0 / (1.0 + math.pow(10, -spread / 13.5))
+
+        # Ensamble final: 50% clasificador histórico (Log5) y 50% proyector de puntaje
+        prob1 = (log5_prob1 + spread_prob1) / 2.0
+        prob2 = 1.0 - prob1
 
         # Feature importances del clasificador
         importances = {}
