@@ -32,9 +32,11 @@ export default function CustomSelect({ options, value, onChange, placeholder = '
         className={`custom-select-trigger${open ? ' open' : ''}`}
         onClick={() => setOpen(!open)}
       >
-        <span className={selected ? '' : 'placeholder'}>{selected ? selected.label : placeholder}</span>
-        <svg width="12" height="8" viewBox="0 0 12 8" className={`chevron${open ? ' flipped' : ''}`}>
-          <path d="M1 1l5 5 5-5" stroke="#666" fill="none" strokeWidth="2" />
+        <span style={{ color: selected ? '#f0f0f5' : 'rgba(240,240,245,0.45)' }}>
+          {selected ? selected.label : placeholder}
+        </span>
+        <svg width="12" height="8" viewBox="0 0 12 8" style={{ flexShrink: 0, transition: 'transform 0.2s', transform: open ? 'rotate(180deg)' : 'none' }}>
+          <path d="M1 1l5 5 5-5" stroke="#999" fill="none" strokeWidth="2" />
         </svg>
       </div>
       {open && (
@@ -42,8 +44,18 @@ export default function CustomSelect({ options, value, onChange, placeholder = '
           {options.map(o => (
             <div
               key={o.value}
-              className={`custom-select-option${o.value === value ? ' selected' : ''}`}
               onClick={() => { onChange(o.value); setOpen(false); }}
+              style={{
+                padding: '0.65rem 1rem',
+                fontSize: '14px',
+                cursor: 'pointer',
+                color: o.value === value ? '#ff6b4a' : '#f0f0f5',
+                background: o.value === value ? 'rgba(232,70,42,0.15)' : 'transparent',
+                fontWeight: o.value === value ? 600 : 400,
+                transition: 'background 0.1s',
+              }}
+              onMouseEnter={e => { if (o.value !== value) (e.currentTarget as HTMLDivElement).style.background = 'rgba(255,255,255,0.06)'; }}
+              onMouseLeave={e => { if (o.value !== value) (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
             >
               {o.label}
             </div>
