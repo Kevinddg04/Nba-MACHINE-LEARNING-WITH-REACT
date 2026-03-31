@@ -39,6 +39,10 @@ DOWNLOAD_DIR   = Path("kaggle_downloads")   # carpeta temporal
 
 def check_kaggle_credentials():
     """Verifica que las credenciales de Kaggle estén configuradas (archivo o variables de entorno)."""
+    # Chequeo para formato nuevo de token único
+    if os.environ.get("KAGGLE_API_TOKEN"):
+        return True
+    # Chequeo para formato viejo de usuario/clave
     if os.environ.get("KAGGLE_USERNAME") and os.environ.get("KAGGLE_KEY"):
         return True
 
