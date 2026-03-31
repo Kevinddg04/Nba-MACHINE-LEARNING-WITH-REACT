@@ -136,6 +136,11 @@ select {
   background-position: right 1rem center;
 }
 select:focus { outline: none; border-color: var(--accent); }
+select option {
+  background: #1c1c25;
+  color: #f0f0f5;
+  padding: 0.5rem;
+}
 
 /* ── RADIO PILL ── */
 .radio-group { display: flex; gap: 0.5rem; flex-wrap: wrap; }
