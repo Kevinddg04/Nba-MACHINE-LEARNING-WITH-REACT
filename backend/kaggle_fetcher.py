@@ -31,9 +31,9 @@ from datetime import datetime
 #    kaggle.com/datasets/johndoe/nba-team-statistics
 #  entonces KAGGLE_DATASET = "johndoe/nba-team-statistics"
 # ─────────────────────────────────────────────────────────────
-KAGGLE_DATASET = "TU_USUARIO/TU_DATASET"   # <-- CAMBIA ESTO
+KAGGLE_DATASET = "eoinamoore/historical-nba-data-and-player-box-scores"
 
-OUTPUT_CSV     = "TeamStatistics.csv"       # nombre que usa tu notebook
+OUTPUT_CSV     = "games.csv"                # nombre del archivo final
 DOWNLOAD_DIR   = Path("kaggle_downloads")   # carpeta temporal
 
 
@@ -92,7 +92,7 @@ def download_dataset(force: bool = False) -> Path:
     )
     print(f"[Kaggle] ✅ Descarga completada en {DOWNLOAD_DIR}/")
 
-    # Buscar el CSV dentro de la carpeta descargada
+    # Buscar games.csv dentro de la carpeta descargada
     csv_files = list(DOWNLOAD_DIR.glob("*.csv"))
     if not csv_files:
         raise FileNotFoundError(
@@ -100,9 +100,9 @@ def download_dataset(force: bool = False) -> Path:
             "Verifica que el dataset contiene archivos .csv."
         )
 
-    # Si hay varios CSVs, preferir el que tenga "Team" en el nombre
-    team_csvs = [f for f in csv_files if "team" in f.name.lower() or "Team" in f.name]
-    chosen = team_csvs[0] if team_csvs else csv_files[0]
+    # Preferir games.csv
+    games_csv = [f for f in csv_files if "games.csv" in f.name.lower()]
+    chosen = games_csv[0] if games_csv else csv_files[0]
     print(f"[Kaggle] Usando archivo: {chosen.name}")
     return chosen
 
