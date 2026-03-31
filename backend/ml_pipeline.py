@@ -33,11 +33,9 @@ from datetime import datetime
 CSV_PATH   = "TeamStatistics.csv"
 MODELS_DIR = Path("models")
 
-# IDs a eliminar (del notebook original)
+# IDs a eliminar (del notebook original - solo equipos de exhibición/All-Star)
 IDS_A_ELIMINAR = [
-    15016, 15018, 50013, 50014,
-    1610612737, 1610612764, 1610612758,
-    1610612755, 1610612746, 1610612766, 1610612760
+    15016, 15018, 50013, 50014
 ]
 
 # Features finales del clasificador (igual que en el notebook, Cell 29)
@@ -148,8 +146,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # Win streak (Cell 14)
     df["win_streak_5"] = (
-        (1 - df["win"])
-        .groupby(df["teamId"])
+        df.groupby("teamId")["win"]
         .transform(lambda x: x.shift(1).rolling(5, min_periods=1).sum())
     )
 
@@ -471,9 +468,17 @@ class NBAPredictor:
         X1 = make_features(t1, t2, home_team == "team1")
         X2 = make_features(t2, t1, home_team == "team2")
 
-        # Clasificador: probabilidad de victoria
-        prob1 = float(self.clf.predict_proba(X1)[0][1])
-        prob2 = 1 - prob1
+        # Clasificador: probabilidad de victoria individual (fuerza absoluta)
+        prob1_raw = float(self.clf.predict_proba(X1)[0][1])
+        prob2_raw = float(self.clf.predict_proba(X2)[0][1])
+
+        # Normalizar para enfrentar la fuerza relativa de ambos
+        total_prob = prob1_raw + prob2_raw
+        if total_prob == 0:
+            prob1, prob2 = 0.5, 0.5
+        else:
+            prob1 = prob1_raw / total_prob
+            prob2 = prob2_raw / total_prob
 
         # Regresor: puntaje proyectado
         # Usamos features ATT_/DEF_ si están disponibles, sino estimamos
