@@ -30,7 +30,7 @@ from datetime import datetime
 # ─────────────────────────────────────────────────────────────────────────────
 #  CONFIGURACIÓN
 # ─────────────────────────────────────────────────────────────────────────────
-CSV_PATH   = "games.csv"
+CSV_PATH   = "TeamStatistics.csv"
 MODELS_DIR = Path("models")
 
 # IDs a eliminar (del notebook original)
