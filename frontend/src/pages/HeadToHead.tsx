@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api';
 import type { Team, H2HResult } from '../types';
+import CustomSelect from '../components/CustomSelect';
 
 interface Props { teams: Team[]; }
 
@@ -25,9 +26,7 @@ export default function HeadToHead({ teams }: Props) {
     }
   };
 
-  const teamOptions = teams.map(t => (
-    <option key={t.team_id} value={t.team_id}>{t.name}</option>
-  ));
+  const teamOptions = teams.map(t => ({ value: t.team_id, label: t.name }));
 
   return (
     <div>
@@ -37,18 +36,20 @@ export default function HeadToHead({ teams }: Props) {
       <div className="card" style={{ display: 'flex', gap: '1.5rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 180 }}>
           <label className="select-label">Equipo 1</label>
-          <select value={team1} onChange={e => { setTeam1(Number(e.target.value)); setResult(null); }}>
-            <option value={0}>— Selecciona —</option>
-            {teamOptions}
-          </select>
+          <CustomSelect
+            options={teamOptions}
+            value={team1}
+            onChange={(v) => { setTeam1(v); setResult(null); }}
+          />
         </div>
         <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', color: 'var(--muted)', paddingBottom: '0.75rem' }}>VS</div>
         <div style={{ flex: 1, minWidth: 180 }}>
           <label className="select-label">Equipo 2</label>
-          <select value={team2} onChange={e => { setTeam2(Number(e.target.value)); setResult(null); }}>
-            <option value={0}>— Selecciona —</option>
-            {teamOptions}
-          </select>
+          <CustomSelect
+            options={teamOptions}
+            value={team2}
+            onChange={(v) => { setTeam2(v); setResult(null); }}
+          />
         </div>
         <button className="btn-secondary" style={{ marginBottom: '0.75rem' }} onClick={fetch} disabled={loading}>
           {loading ? '…' : 'VER H2H'}

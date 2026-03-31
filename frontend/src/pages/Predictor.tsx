@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { api } from '../api';
 import type { Team, PredictionResult } from '../types';
+import CustomSelect from '../components/CustomSelect';
 
 interface Props { teams: Team[]; }
 
@@ -28,9 +29,7 @@ export default function Predictor({ teams }: Props) {
     }
   }, [team1, team2, home]);
 
-  const teamOptions = teams.map(t => (
-    <option key={t.team_id} value={t.team_id}>{t.name}</option>
-  ));
+  const teamOptions = teams.map(t => ({ value: t.team_id, label: t.name }));
 
   const t1Name = teams.find(t => t.team_id === team1)?.name ?? 'Equipo 1';
   const t2Name = teams.find(t => t.team_id === team2)?.name ?? 'Equipo 2';
@@ -47,20 +46,22 @@ export default function Predictor({ teams }: Props) {
         <div className="predictor-grid">
           <div>
             <label className="select-label">Equipo 1</label>
-            <select value={team1} onChange={e => { setTeam1(Number(e.target.value)); setResult(null); }}>
-              <option value={0}>— Selecciona —</option>
-              {teamOptions}
-            </select>
+            <CustomSelect
+              options={teamOptions}
+              value={team1}
+              onChange={(v) => { setTeam1(v); setResult(null); }}
+            />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', paddingTop: '1.8rem' }}>
             <span style={{ fontFamily: 'var(--font-display)', fontSize: '2rem', color: 'var(--muted)', letterSpacing: '2px' }}>VS</span>
           </div>
           <div>
             <label className="select-label">Equipo 2</label>
-            <select value={team2} onChange={e => { setTeam2(Number(e.target.value)); setResult(null); }}>
-              <option value={0}>— Selecciona —</option>
-              {teamOptions}
-            </select>
+            <CustomSelect
+              options={teamOptions}
+              value={team2}
+              onChange={(v) => { setTeam2(v); setResult(null); }}
+            />
           </div>
         </div>
 
@@ -130,3 +131,4 @@ export default function Predictor({ teams }: Props) {
     </div>
   );
 }
+
