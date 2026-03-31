@@ -1,0 +1,19 @@
+# Archivos de entorno y cache Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.env
+
+# Archivos pesados / Kaggle
+TeamStatistics.csv
+kaggle_downloads/
+
+# Modelos (se generarán dinámicamente en Render durante el build o con el cron)
+models/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+.DS_Store
