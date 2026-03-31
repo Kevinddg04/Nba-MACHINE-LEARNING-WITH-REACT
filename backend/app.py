@@ -46,12 +46,23 @@ def get_teams():
     teams = predictor.get_all_teams()
     result = []
     for t in teams:
-        try:
-            s = predictor.get_team_stats(t["team_id"])
-            s["conf"] = CONFERENCE.get(t["team_id"], "Unknown")
-            result.append(s)
-        except Exception:
-            pass
+        tid = t["team_id"]
+        # Buscar en snapshot las estadísticas del equipo
+        row_df = predictor.snapshot[predictor.snapshot["teamId"] == tid]
+        if row_df.empty:
+            continue
+        row = row_df.iloc[0]
+        result.append({
+            "team_id":               tid,
+            "name":                  t["team_name"],
+            "conf":                  CONFERENCE.get(tid, "Unknown"),
+            "expectedScore":         round(float(row.get("expectedTeamScore", 0)), 1),
+            "expectedOpponentScore": round(float(row.get("expectedOpponentScore", 0)), 1),
+            "net_expected":          round(float(row.get("expectedTeamScore", 0)) - float(row.get("expectedOpponentScore", 0)), 1),
+            "win_streak_5":          round(float(row.get("win_streak_5", 0)), 1),
+            "RealHandicap":          round(float(row.get("RealHandicap", 0)), 1),
+            "fg_pct":                round(float(row.get("fieldGoalsPercentage", 0)) * 100, 1),
+        })
     return jsonify(result)
 
 
