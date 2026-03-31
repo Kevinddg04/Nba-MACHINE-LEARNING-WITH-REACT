@@ -100,8 +100,8 @@ def download_dataset(force: bool = False) -> Path:
             "Verifica que el dataset contiene archivos .csv."
         )
 
-    # Si hay varios CSVs, preferir el que tenga "Team" en el nombre o TeamStatistics.csv
-    team_csvs = [f for f in csv_files if "team" in f.name.lower() or "Team" in f.name]
+    # Preferir TeamStatistics.csv explícitamente
+    team_csvs = [f for f in csv_files if "TeamStatistics.csv".lower() in f.name.lower()]
     chosen = team_csvs[0] if team_csvs else csv_files[0]
     print(f"[Kaggle] Usando archivo: {chosen.name}")
     return chosen
