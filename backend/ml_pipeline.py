@@ -205,6 +205,12 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         .reset_index(level=0, drop=True)
     )
 
+    # Defensa (rolling 10 del oponente - solicitado por usuario)
+    df["defensive_rating_r10"] = (
+        df.groupby("teamId")["opponentScore"]
+        .transform(lambda x: x.shift(1).rolling(10, min_periods=1).mean())
+    )
+
     # Dropear NaN
     df = df.dropna().reset_index(drop=True)
 
@@ -227,47 +233,103 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
 #  3. ENTRENAMIENTO
 # ─────────────────────────────────────────────────────────────────────────────
 
+def build_classifier_matchup_data(df: pd.DataFrame):
+    """
+    Transforma filas de equipos individuales en filas de DUELOS (Matchups).
+    Una fila por partido con prefijos A_ contra B_ y features relativas.
+    """
+    print("[Pipeline] Construyendo Duelos (Matchups) A vs B...")
+    
+    # Separar Locales y Visitantes para el merge inicial
+    home_df = df[df["home"] == 1].copy()
+    away_df = df[df["home"] == 0].copy()
+
+    # Columnas core para el duelo
+    core_cols = [
+        "expectedTeamScore", "defensive_rating_r10", 
+        "win_streak_5", "RealHandicap", "totalPoints"
+    ]
+    core_cols = [c for c in core_cols if c in df.columns]
+
+    # Merge de Home y Away por GameId
+    # Para el modelo: Home es A y Away es B
+    matchup = home_df[["gameId", "gameDateTimeEst", "teamId", "opponentTeamId", "win", "home"] + core_cols].merge(
+        away_df[["gameId", "teamId"] + core_cols],
+        on="gameId",
+        suffixes=("_A", "_B")
+    )
+
+    # 2. Features de Diferencia Relativa (A - B) - Solicitado por usuario
+    matchup["DIFF_offense"]  = matchup["expectedTeamScore_A"] - matchup["expectedTeamScore_B"]
+    matchup["DIFF_defense"]  = matchup["defensive_rating_r10_A"] - matchup["defensive_rating_r10_B"]
+    matchup["DIFF_streak"]   = matchup["win_streak_5_A"] - matchup["win_streak_5_B"]
+    matchup["DIFF_handicap"] = matchup["RealHandicap_A"] - matchup["RealHandicap_B"]
+
+    # Target: 1 si gano el Equipo A, 0 si gano el B
+    matchup = matchup.rename(columns={"win": "label_win_A"})
+
+    print(f"  → {len(matchup):,} partidos procesados como duelos A vs B")
+    return matchup
+
+
 def train_classifier(df: pd.DataFrame):
     """
-    Entrena CatBoostClassifier (win/loss) — idéntico a Cell 29.
-    Guarda el modelo y retorna (model, accuracy).
+    Entrena CatBoostClassifier basado en DUELOS (Matchups).
     """
     from catboost import CatBoostClassifier
-    from sklearn.model_selection import train_test_split
-    from sklearn.metrics import accuracy_score
+    from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
+    import numpy as np
 
-    print("\n[Classifier] Entrenando CatBoostClassifier...")
+    # 1. Construir Matchups
+    df_model = build_classifier_matchup_data(df)
+    
+    # 2. Split Temporal Cronológico (80% Pasado / 20% Más Reciente)
+    df_model = df_model.sort_values("gameDateTimeEst")
+    split_idx = int(len(df_model) * 0.80)
+    
+    train_data = df_model.iloc[:split_idx]
+    test_data  = df_model.iloc[split_idx:]
 
-    features = [f for f in CLASSIFIER_FEATURES if f in df.columns]
-    X = df[features]
-    y = df["win"]
+    # 3. Selección de Features (A, B, Diferencias y Localía)
+    X_cols = [c for c in df_model.columns if c.endswith("_A") or c.endswith("_B") or c.startswith("DIFF_") or c == "home"]
+    # Limpiar IDs de la lista de features para evitar leakage de equipos específicos
+    X_cols = [c for c in X_cols if "teamId" not in c and "label" not in c and "home_B" not in c]
+    
+    X_train, y_train = train_data[X_cols], train_data["label_win_A"]
+    X_test,  y_test  = test_data[X_cols],  test_data["label_win_A"]
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.20, random_state=42, stratify=y
-    )
-
+    print(f"[Classifier] Entrenando con {len(X_train)} partidos / Evaluando con {len(X_test)}")
+    
     model = CatBoostClassifier(
-        iterations=1200,
-        learning_rate=0.045,
-        depth=6,
-        eval_metric="Accuracy",
-        random_seed=42,
-        verbose=200,
-        use_best_model=True,
+        iterations=1200, depth=6, learning_rate=0.045,
+        verbose=200, random_seed=42
     )
-    model.fit(X_train, y_train, eval_set=(X_test, y_test))
+    
+    model.fit(X_train, y_train, eval_set=(X_test, y_test), verbose=200)
 
-    y_pred = model.predict(X_test)
-    acc = accuracy_score(y_test, y_pred)
-    print(f"[Classifier] ✅ Accuracy: {acc*100:.2f}%")
+    # Evaluación
+    preds = model.predict(X_test)
+    acc   = accuracy_score(y_test, preds)
 
-    # Guardar modelo y metadatos
+    print(f"\n[Classifier] ✅ Accuracy: {acc*100:.2f}%")
+    print("\nMatriz de Confusión (Matchup):")
+    print(confusion_matrix(y_test, preds))
+    print("\nReporte de Clasificación:")
+    print(classification_report(y_test, preds))
+
+    # Feature Importance (Top 5 solicitado)
+    feat_imp = model.get_feature_importance()
+    top_indices = np.argsort(feat_imp)[-5:][::-1]
+    print("\n⭐ TOP 5 FEATURES MÁS IMPORTANTES:")
+    for idx in top_indices:
+        print(f"  - {X_cols[idx]}: {feat_imp[idx]:.2f}")
+
     MODELS_DIR.mkdir(exist_ok=True)
-    joblib.dump(model,    MODELS_DIR / "classifier.pkl")
-    joblib.dump(features, MODELS_DIR / "classifier_features.pkl")
-    print(f"[Classifier] Modelo guardado en {MODELS_DIR}/classifier.pkl")
+    joblib.dump(model,  MODELS_DIR / "classifier.pkl")
+    joblib.dump(X_cols, MODELS_DIR / "classifier_features.pkl")
+    print(f"[Classifier] Modelo Matchup guardado en {MODELS_DIR}/classifier.pkl")
 
-    return model, acc, features
+    return model, acc, X_cols
 
 
 def build_regressor_features(df: pd.DataFrame):
@@ -434,79 +496,51 @@ class NBAPredictor:
 
     def predict(self, team1_id: int, team2_id: int, home_team: str = "team1") -> dict:
         """
-        Predice el resultado de un partido.
-
-        Args:
-            team1_id:  NBA team ID del equipo 1
-            team2_id:  NBA team ID del equipo 2
-            home_team: "team1" | "team2" | "neutral"
-
-        Returns:
-            dict con probabilidades, puntaje proyectado y factores del modelo.
+        Predice quien gana basandose en el MATCHUP de fuerza relativa (A vs B).
         """
         if not self.models_loaded:
             raise RuntimeError("Modelos no cargados. Ejecuta ml_pipeline.py primero.")
 
-        t1 = self._get_team_row(team1_id)
-        t2 = self._get_team_row(team2_id)
+        team1_stats = self._get_team_row(team1_id)
+        team2_stats = self._get_team_row(team2_id)
 
-        # Construir vector de features del equipo 1 (usa sus propias stats históricas)
-        home_bonus = 2.5 if home_team == "team1" else (-2.5 if home_team == "team2" else 0)
-
-        def make_features(team_row, opp_row, is_home: bool) -> pd.DataFrame:
-            row = {}
-            for feat in self.clf_features:
-                if feat in team_row.index:
-                    row[feat] = team_row[feat]
-                else:
-                    row[feat] = 0.0
-            # Ajuste por ventaja de local
-            if is_home and "expectedTeamScore" in row:
-                row["expectedTeamScore"] = row.get("expectedTeamScore", 0) + 2.5
-            return pd.DataFrame([row])
-
-        X1 = make_features(t1, t2, home_team == "team1")
-        X2 = make_features(t2, t1, home_team == "team2")
-
-        # Clasificador: probabilidad de victoria individual (fuerza absoluta)
-        prob1_raw = float(self.clf.predict_proba(X1)[0][1])
-        prob2_raw = float(self.clf.predict_proba(X2)[0][1])
-
-        # Regresor: puntaje proyectado (Estimación base)
-        score1_raw = float(t1.get("expectedTeamScore", 110))
-        score2_raw = float(t2.get("expectedTeamScore", 110))
-
+        # Determinar A y B para el modelo
         if home_team == "team1":
-            score1_raw += 2.5
-        elif home_team == "team2":
-            score2_raw += 2.5
-
-        # Normalización matemática: Fórmula Log5 de Bill James para enfrentamientos
-        p1 = prob1_raw
-        p2 = prob2_raw
-        denom = p1 + p2 - 2 * p1 * p2
-        if denom == 0:
-            log5_prob1 = 0.5
+            stats_A, stats_B = team1_stats, team2_stats
+            is_home_A = 1
         else:
-            log5_prob1 = (p1 - p1 * p2) / denom
+            stats_A, stats_B = team2_stats, team1_stats
+            is_home_A = 1 # El modelo se entrenó con Home=A
 
-        # Probabilidad implícita por el margen de puntos (Método Vegas/Elo)
-        # En la NBA, ~13.5 pts de ventaja implican un 90% de probabilidad de ganar
-        spread = score1_raw - score2_raw
-        import math
-        spread_prob1 = 1.0 / (1.0 + math.pow(10, -spread / 13.5))
+        # Construir vector de features
+        row = {}
+        # Prefijos A_ y B_
+        feats_A = ["expectedTeamScore", "defensive_rating_r10", "win_streak_5", "RealHandicap", "totalPoints"]
+        for f in feats_A:
+            row[f"{f}_A"] = float(stats_A.get(f, 0))
+            row[f"{f}_B"] = float(stats_B.get(f, 0))
 
-        # Ensamble final: 50% clasificador histórico (Log5) y 50% proyector de puntaje
-        prob1 = (log5_prob1 + spread_prob1) / 2.0
+        # Diferencias Relativas
+        row["DIFF_offense"]  = row["expectedTeamScore_A"] - row["expectedTeamScore_B"]
+        row["DIFF_defense"]  = row["defensive_rating_r10_A"] - row["defensive_rating_r10_B"]
+        row["DIFF_streak"]   = row["win_streak_5_A"] - row["win_streak_5_B"]
+        row["DIFF_handicap"] = row["RealHandicap_A"] - row["RealHandicap_B"]
+        row["home"] = is_home_A
+
+        # Ordenar columnas según el modelo
+        X_matchup = pd.DataFrame([row])
+        X_matchup = X_matchup[self.clf_features]
+
+        # Predicción Directa
+        prob_home_win = float(self.clf.predict_proba(X_matchup)[0][1])
+        
+        # Mapping de vuelta a Team 1
+        if home_team == "team1":
+            prob1 = prob_home_win
+        else:
+            prob1 = 1.0 - prob_home_win
+        
         prob2 = 1.0 - prob1
-
-        # Feature importances del clasificador
-        importances = {}
-        feat_imp = self.clf.get_feature_importance()
-        for feat, imp in zip(self.clf_features, feat_imp):
-            importances[feat] = round(float(imp), 2)
-
-        top_features = sorted(importances.items(), key=lambda x: -x[1])[:5]
 
         return {
             "team1_id": team1_id,
@@ -515,20 +549,15 @@ class NBAPredictor:
             "team2_name": TEAM_NAMES.get(team2_id, f"Team {team2_id}"),
             "team1_win_prob": round(prob1 * 100, 1),
             "team2_win_prob": round(prob2 * 100, 1),
-            "team1_projected_score": round(score1_raw, 1),
-            "team2_projected_score": round(score2_raw, 1),
             "home_team": home_team,
-            "model": "CatBoostClassifier",
-            "top_features": [{"feature": f, "importance": i} for f, i in top_features],
+            "model": "Matchup-Aware A/B Classifier",
             "team1_recent": {
-                "win_streak_5": round(float(t1.get("win_streak_5", 0)), 1),
-                "expectedTeamScore": round(float(t1.get("expectedTeamScore", 0)), 1),
-                "RealHandicap": round(float(t1.get("RealHandicap", 0)), 1),
+                "win_streak_5": round(float(team1_stats.get("win_streak_5", 0)), 1),
+                "expectedScore": round(float(team1_stats.get("expectedTeamScore", 0)), 1),
             },
             "team2_recent": {
-                "win_streak_5": round(float(t2.get("win_streak_5", 0)), 1),
-                "expectedTeamScore": round(float(t2.get("expectedTeamScore", 0)), 1),
-                "RealHandicap": round(float(t2.get("RealHandicap", 0)), 1),
+                "win_streak_5": round(float(team2_stats.get("win_streak_5", 0)), 1),
+                "expectedScore": round(float(team2_stats.get("expectedTeamScore", 0)), 1),
             },
         }
 
