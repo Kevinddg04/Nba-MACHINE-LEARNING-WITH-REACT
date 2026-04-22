@@ -21,7 +21,7 @@ export default function Predictor({ teams }: Props) {
     try {
       const data = await api.predict(team1, team2, home);
       setResult(data);
-      setTimeout(() => setAnimProb(data.team1_win_prob), 100);
+      setTimeout(() => setAnimProb(data.team1.probability), 100);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Error desconocido');
     } finally {
@@ -89,19 +89,17 @@ export default function Predictor({ teams }: Props) {
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: '1rem', textAlign: 'center', marginBottom: '1.5rem' }}>
             <div>
-              <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.6rem', letterSpacing: '1px', lineHeight: 1.1 }}>{result.team1_name}</div>
-              <div style={{ fontFamily: 'var(--font-display)', fontSize: '3.5rem', letterSpacing: '2px', color: result.team1_win_prob >= 50 ? 'var(--green)' : 'var(--muted)' }}>
-                {result.team1_win_prob}%
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.6rem', letterSpacing: '1px', lineHeight: 1.1 }}>{result.team1.name}</div>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: '3.5rem', letterSpacing: '2px', color: result.team1.probability >= 50 ? 'var(--green)' : 'var(--muted)' }}>
+                {result.team1.probability}%
               </div>
-              <div style={{ fontSize: 14, color: 'var(--muted)', marginTop: 4 }}>Proj: {result.team1_projected_score} pts</div>
             </div>
             <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', color: 'var(--muted)', alignSelf: 'center' }}>VS</div>
             <div>
-              <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.6rem', letterSpacing: '1px', lineHeight: 1.1 }}>{result.team2_name}</div>
-              <div style={{ fontFamily: 'var(--font-display)', fontSize: '3.5rem', letterSpacing: '2px', color: result.team2_win_prob >= 50 ? 'var(--green)' : 'var(--muted)' }}>
-                {result.team2_win_prob}%
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.6rem', letterSpacing: '1px', lineHeight: 1.1 }}>{result.team2.name}</div>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: '3.5rem', letterSpacing: '2px', color: result.team2.probability >= 50 ? 'var(--green)' : 'var(--muted)' }}>
+                {result.team2.probability}%
               </div>
-              <div style={{ fontSize: 14, color: 'var(--muted)', marginTop: 4 }}>Proj: {result.team2_projected_score} pts</div>
             </div>
           </div>
 
@@ -109,26 +107,28 @@ export default function Predictor({ teams }: Props) {
             <div className="prob-bar-fill" style={{ width: `${animProb}%` }} />
           </div>
 
-          {result.top_features?.length > 0 && (
-            <>
-              <div className="card-title" style={{ marginTop: '1.25rem' }}>Top features del modelo</div>
-              <div className="factors-grid">
-                {result.top_features.slice(0, 3).map(f => (
-                  <div key={f.feature} className="factor-card">
-                    <div className="factor-val" style={{ color: 'var(--accent2)', fontSize: 16 }}>{f.importance.toFixed(1)}%</div>
-                    <div className="factor-label">{f.feature}</div>
-                  </div>
-                ))}
+          <div className="factors-grid" style={{ marginTop: '1.25rem' }}>
+            <div className="factor-card">
+              <div className="factor-val" style={{ color: 'var(--accent2)' }}>{result.details.t1_streak}</div>
+              <div className="factor-label">Racha Eq. 1</div>
+            </div>
+            <div className="factor-card">
+              <div className="factor-val" style={{ color: 'var(--blue)' }}>
+                {result.details.home_court === 'team1' ? t1Name : result.details.home_court === 'team2' ? t2Name : 'Neutral'}
               </div>
-            </>
-          )}
+              <div className="factor-label">Localía</div>
+            </div>
+            <div className="factor-card">
+              <div className="factor-val" style={{ color: 'var(--accent2)' }}>{result.details.t2_streak}</div>
+              <div className="factor-label">Racha Eq. 2</div>
+            </div>
+          </div>
 
           <div style={{ marginTop: '1rem', fontSize: 12, color: 'var(--muted)', textAlign: 'center' }}>
-            Modelo: {result.model} · Los resultados son estimaciones estadísticas
+            Modelo: {result.model_info} · Los resultados son estimaciones estadísticas
           </div>
         </div>
       )}
     </div>
   );
 }
-

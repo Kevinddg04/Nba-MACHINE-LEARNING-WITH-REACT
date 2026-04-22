@@ -4,11 +4,10 @@ import { api } from './api';
 import type { Team } from './types';
 import Predictor from './pages/Predictor';
 import Standings from './pages/Standings';
-import Players from './pages/Players';
 import HeadToHead from './pages/HeadToHead';
 
-type Page = 'Predictor' | 'Standings' | 'Jugadores' | 'Head-to-Head';
-const PAGES: Page[] = ['Predictor', 'Standings', 'Jugadores', 'Head-to-Head'];
+type Page = 'Predictor' | 'Standings' | 'Head-to-Head';
+const PAGES: Page[] = ['Predictor', 'Standings', 'Head-to-Head'];
 
 export default function App() {
   const [page, setPage] = useState<Page>('Predictor');
@@ -41,7 +40,6 @@ export default function App() {
       <main>
         {page === 'Predictor'    && <Predictor teams={teams} />}
         {page === 'Standings'    && <Standings />}
-        {page === 'Jugadores'    && <Players />}
         {page === 'Head-to-Head' && <HeadToHead teams={teams} />}
       </main>
 

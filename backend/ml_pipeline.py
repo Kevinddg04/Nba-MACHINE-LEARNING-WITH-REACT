@@ -38,19 +38,8 @@ IDS_A_ELIMINAR = [
     15016, 15018, 50013, 50014
 ]
 
-# Features finales del clasificador (igual que en el notebook, Cell 29)
-CLASSIFIER_FEATURES = [
-    "assists", "blocks", "steals",
-    "fieldGoalsAttempted", "fieldGoalsMade", "fieldGoalsPercentage",
-    "threePointersAttempted", "threePointersMade", "threePointersPercentage",
-    "freeThrowsAttempted", "freeThrowsMade", "freeThrowsPercentage",
-    "reboundsDefensive", "reboundsOffensive", "reboundsTotal",
-    "foulsPersonal", "turnovers",
-    "totalPoints", "RealHandicap",
-    "win_streak_5",
-    "expectedTeamScore",
-    "expectedOpponentScore",
-]
+
+
 
 TEAM_NAMES = {
     1610612738: "Boston Celtics",

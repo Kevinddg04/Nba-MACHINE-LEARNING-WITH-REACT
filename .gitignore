@@ -10,8 +10,8 @@ env/
 TeamStatistics.csv
 kaggle_downloads/
 
-# Modelos (se generarán dinámicamente en Render durante el build o con el cron)
-models/
+# Logs de entrenamiento CatBoost
+catboost_info/
 
 # Frontend
 frontend/node_modules/

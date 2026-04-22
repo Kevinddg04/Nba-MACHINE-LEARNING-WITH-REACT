@@ -10,43 +10,17 @@ export interface Team {
   fg_pct: number;
 }
 
-export interface Player {
-  name: string;
-  team: string;
-  ppg: number;
-  rpg: number;
-  apg: number;
-  spg: number;
-  bpg: number;
-  fg_pct: number;
-  fg3_pct: number;
-}
-
-export interface TopFeature {
-  feature: string;
-  importance: number;
-}
-
-export interface TeamRecent {
-  win_streak_5: number;
-  expectedTeamScore: number;
-  RealHandicap: number;
-}
-
 export interface PredictionResult {
-  team1_id: number;
-  team2_id: number;
-  team1_name: string;
-  team2_name: string;
-  team1_win_prob: number;
-  team2_win_prob: number;
-  team1_projected_score: number;
-  team2_projected_score: number;
-  home_team: string;
-  model: string;
-  top_features: TopFeature[];
-  team1_recent: TeamRecent;
-  team2_recent: TeamRecent;
+  prediction: string;
+  win_probability: number;
+  team1: { name: string; probability: number };
+  team2: { name: string; probability: number };
+  model_info: string;
+  details: {
+    t1_streak: number;
+    t2_streak: number;
+    home_court: string;
+  };
 }
 
 export interface H2HGame {
@@ -64,6 +38,11 @@ export interface H2HResult {
   team1_wins: number;
   team2_wins: number;
   games: H2HGame[];
+}
+
+export interface TopFeature {
+  feature: string;
+  importance: number;
 }
 
 export interface ModelInfo {
