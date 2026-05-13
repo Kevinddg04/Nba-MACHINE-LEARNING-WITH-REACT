@@ -16,6 +16,9 @@ from ml_pipeline import NBAPredictor, TEAM_NAMES
 import random
 import os
 import subprocess
+import threading
+import time
+import requests as http_requests
 
 app = Flask(__name__)
 CORS(app)
@@ -37,6 +40,50 @@ CONFERENCE = {
 
 def err(msg, code=400):
     return jsonify({"error": msg}), code
+
+
+# ─── KEEP-ALIVE ─────────────────────────────────────────────────────────────
+# UptimeRobot pinguea este endpoint cada 14 minutos para evitar cold starts
+@app.route("/health", methods=["GET"])
+def health():
+    """Health check endpoint para monitoreo y keep-alive."""
+    return jsonify({
+        "status": "ok",
+        "models_loaded": predictor.models_loaded,
+        "service": "NBA ML Predictor API"
+    }), 200
+
+
+@app.route("/ping", methods=["GET"])
+def ping():
+    """Alias ligero del health check."""
+    return jsonify({"pong": True}), 200
+
+
+def _self_ping():
+    """
+    Hilo de fondo: hace auto-ping cada 14 minutos.
+    Actúa como respaldo si UptimeRobot falla temporarily.
+    Solo se activa en producción (cuando PORT está definida en el entorno).
+    """
+    # Esperar 60s al arrancar para que gunicorn esté listo
+    time.sleep(60)
+    base_url = os.environ.get("SELF_URL", "")
+    if not base_url:
+        print("[Keep-Alive] SELF_URL no definida — auto-ping deshabilitado.")
+        return
+    while True:
+        try:
+            http_requests.get(f"{base_url}/ping", timeout=10)
+            print("[Keep-Alive] Auto-ping OK")
+        except Exception as e:
+            print(f"[Keep-Alive] Auto-ping falló: {e}")
+        time.sleep(14 * 60)  # 14 minutos
+
+
+if os.environ.get("PORT"):  # Solo en producción (Render expone PORT)
+    t = threading.Thread(target=_self_ping, daemon=True)
+    t.start()
 
 
 @app.route("/api/teams", methods=["GET"])
