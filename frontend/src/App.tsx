@@ -5,9 +5,10 @@ import type { Team } from './types';
 import Predictor from './pages/Predictor';
 import Standings from './pages/Standings';
 import HeadToHead from './pages/HeadToHead';
+import Metrics from './pages/Metrics';
 
-type Page = 'Predictor' | 'Standings' | 'Head-to-Head';
-const PAGES: Page[] = ['Predictor', 'Standings', 'Head-to-Head'];
+type Page = 'Predictor' | 'Standings' | 'Head-to-Head' | 'Metrics';
+const PAGES: Page[] = ['Predictor', 'Standings', 'Head-to-Head', 'Metrics'];
 
 export default function App() {
   const [page, setPage] = useState<Page>('Predictor');
@@ -41,6 +42,7 @@ export default function App() {
         {page === 'Predictor'    && <Predictor teams={teams} />}
         {page === 'Standings'    && <Standings />}
         {page === 'Head-to-Head' && <HeadToHead teams={teams} />}
+        {page === 'Metrics'      && <Metrics />}
       </main>
 
       <footer>

@@ -31,10 +31,12 @@ from datetime import datetime
 #    kaggle.com/datasets/johndoe/nba-team-statistics
 #  entonces KAGGLE_DATASET = "johndoe/nba-team-statistics"
 # ─────────────────────────────────────────────────────────────
-KAGGLE_DATASET = "eoinamoore/historical-nba-data-and-player-box-scores"
+BASE_DIR = Path(__file__).parent
+PROJECT_ROOT = BASE_DIR.parent
 
-OUTPUT_CSV     = "TeamStatistics.csv"       # nombre que usa tu notebook
-DOWNLOAD_DIR   = Path("kaggle_downloads")   # carpeta temporal
+KAGGLE_DATASET = "eoinamoore/historical-nba-data-and-player-box-scores"
+OUTPUT_CSV     = str(PROJECT_ROOT / "TeamStatistics.csv")       # nombre que usa tu notebook
+DOWNLOAD_DIR   = BASE_DIR / "kaggle_downloads"   # carpeta temporal
 
 
 def check_kaggle_credentials():

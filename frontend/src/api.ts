@@ -1,4 +1,4 @@
-import type { Team, PredictionResult, H2HResult, ModelInfo } from './types';
+import type { Team, PredictionResult, H2HResult, ModelInfo, SystemMetrics } from './types';
 
 const BASE = import.meta.env.VITE_API_URL || '/api';
 
@@ -32,4 +32,7 @@ export const api = {
 
   modelInfo: () =>
     request<ModelInfo>('/model/info'),
+
+  getMetrics: () =>
+    request<SystemMetrics>('/metrics'),
 };

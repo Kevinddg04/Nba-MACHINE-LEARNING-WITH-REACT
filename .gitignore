@@ -6,6 +6,12 @@ venv/
 env/
 .env
 
+# Pruebas y DB Local
+.pytest_cache/
+backend/nba.db
+backend/logs/
+
+
 # Archivos pesados / Kaggle
 TeamStatistics.csv
 kaggle_downloads/

@@ -52,3 +52,25 @@ export interface ModelInfo {
   top_10_features: TopFeature[];
   teams_in_snapshot: number;
 }
+
+export interface MetricHistory {
+  id: number;
+  team1: string;
+  team2: string;
+  home: string;
+  predicted: string;
+  prob: number;
+  actual_winner: string | null;
+  correct: boolean | null;
+  date: string;
+}
+
+export interface SystemMetrics {
+  metrics: {
+    total_predictions: number;
+    resolved: number;
+    correct: number;
+    hit_rate: number;
+  };
+  history: MetricHistory[];
+}

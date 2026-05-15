@@ -30,8 +30,11 @@ from datetime import datetime
 # ─────────────────────────────────────────────────────────────────────────────
 #  CONFIGURACIÓN
 # ─────────────────────────────────────────────────────────────────────────────
-CSV_PATH   = "TeamStatistics.csv"
-MODELS_DIR = Path("models")
+BASE_DIR = Path(__file__).parent
+PROJECT_ROOT = BASE_DIR.parent
+
+CSV_PATH   = str(PROJECT_ROOT / "TeamStatistics.csv")
+MODELS_DIR = BASE_DIR / "models"
 
 # IDs a eliminar (del notebook original - solo equipos de exhibición/All-Star)
 IDS_A_ELIMINAR = [
@@ -297,50 +300,72 @@ def train_classifier(df: pd.DataFrame):
     X_cols = [c for c in df_model.columns if c.endswith("_A") or c.endswith("_B") or c.startswith("DIFF_") or c == "home"]
     X_cols = [c for c in X_cols if "teamId" not in c and "label" not in c and "home_B" not in c]
     
-    X_train, y_train = train_data[X_cols], train_data["label_win_A"]
-    X_test,  y_test  = test_data[X_cols],  test_data["label_win_A"]
+    X_train_full, y_train = train_data[X_cols], train_data["label_win_A"]
+    X_test_full,  y_test  = test_data[X_cols],  test_data["label_win_A"]
 
+    from ml.ensemble import build_ensemble
+    from ml.feature_selection import select_features_final
+    from ml.calibration import calibrate_classifier
+    from ml.cross_validation import time_series_cv
+    from catboost import CatBoostClassifier
+
+    # 4. Feature Selection using VIF and SelectKBest
+    print(f"[Classifier] Realizando feature selection (de {len(X_cols)} features)...")
+    selected_cols = select_features_final(X_train_full, y_train, k=35, vif_threshold=15.0)
+    # Ensure home is always included
+    if "home" not in selected_cols and "home" in X_train_full.columns:
+        selected_cols.append("home")
+        
+    X_train = X_train_full[selected_cols]
+    X_test  = X_test_full[selected_cols]
+
+    print(f"[Classifier] Entrenando preseleccionando {len(selected_cols)} features...")
     print(f"[Classifier] Entrenando con {len(X_train)} partidos / Evaluando con {len(X_test)}")
     
-    # MODELO CALIBRADO (Realismo NBA)
-    # l2_leaf_reg alto (20.0) → Impide que el modelo sea "arrogante" con pequeñas ventajas.
-    # subsample (0.7) → Añade "ruido realista" para simular la variabilidad de la liga.
-    model = CatBoostClassifier(
-        iterations=1500, # Un poco más para compensar la regularización
-        depth=6, 
-        learning_rate=0.03, # Más lento para mayor precisión
-        l2_leaf_reg=20.0, 
-        bootstrap_type='Bernoulli',
-        subsample=0.7,
-        random_seed=42,
-        verbose=300
+    # Run a quick CV baseline with CatBoost
+    cb_baseline = CatBoostClassifier(iterations=200, depth=6, learning_rate=0.03, verbose=False)
+    cv_results = time_series_cv(cb_baseline, df_model[selected_cols], df_model["label_win_A"], n_splits=5)
+    print(f"[Classifier] Baseline CV Mean Accuracy: {cv_results['mean_accuracy']:.4f} ± {cv_results['std_accuracy']:.4f}")
+
+    # 5. Build unfitted Ensemble
+    ensemble = build_ensemble(
+        catboost_params={'iterations': 600, 'depth': 6, 'learning_rate': 0.03, 'l2_leaf_reg': 20.0, 'bootstrap_type': 'Bernoulli', 'subsample': 0.7, 'random_seed': 42, 'verbose': False},
+        lgbm_params={'n_estimators': 500, 'learning_rate': 0.03, 'max_depth': 6, 'reg_lambda': 10.0, 'subsample': 0.7, 'random_state': 42, 'verbose': -1}
     )
-    
-    model.fit(X_train, y_train, eval_set=(X_test, y_test), early_stopping_rounds=100, verbose=300)
+
+    # 6. Calibración (Platt Scaling) - Esto entrenará el modelo (cv=3 folds)
+    print("[Classifier] Entrenando y Calibrando Ensemble (cv=3) ...")
+    calibrated_model = calibrate_classifier(ensemble, X_train, y_train, cv=3)
 
     # Evaluación
-    preds = model.predict(X_test)
+    preds = calibrated_model.predict(X_test)
     acc   = accuracy_score(y_test, preds)
 
-    print(f"\n[Classifier] ✅ Accuracy: {acc*100:.2f}%")
+    print(f"\n[Classifier] ✅ Calibrated Ensemble Accuracy: {acc*100:.2f}%")
     print("\nMatriz de Confusión (Matchup):")
     print(confusion_matrix(y_test, preds))
     print("\nReporte de Clasificación:")
     print(classification_report(y_test, preds))
 
-    # Feature Importance (Top 5 solicitado)
-    feat_imp = model.get_feature_importance()
+    # Feature Importance: approximate from CatBoost inside the ensemble
+    try:
+        cb = ensemble.named_estimators_['catboost']
+        feat_imp = cb.get_feature_importance()
+    except Exception:
+        feat_imp = np.ones(len(selected_cols))
+        
     top_indices = np.argsort(feat_imp)[-5:][::-1]
-    print("\n⭐ TOP 5 FEATURES MÁS IMPORTANTES:")
+    print("\n⭐ TOP 5 FEATURES MÁS IMPORTANTES (basado en CatBoost base):")
     for idx in top_indices:
-        print(f"  - {X_cols[idx]}: {feat_imp[idx]:.2f}")
+        print(f"  - {selected_cols[idx]}: {feat_imp[idx]:.2f}")
 
     MODELS_DIR.mkdir(exist_ok=True)
-    joblib.dump(model,  MODELS_DIR / "classifier.pkl")
-    joblib.dump(X_cols, MODELS_DIR / "classifier_features.pkl")
-    print(f"[Classifier] Modelo Matchup guardado en {MODELS_DIR}/classifier.pkl")
+    joblib.dump(calibrated_model,  MODELS_DIR / "classifier.pkl")
+    joblib.dump(selected_cols, MODELS_DIR / "classifier_features.pkl")
+    joblib.dump(feat_imp, MODELS_DIR / "classifier_feature_importances.pkl")
+    print(f"[Classifier] Modelo Matchup Ensemble guardado en {MODELS_DIR}/classifier.pkl")
 
-    return model, acc, X_cols
+    return calibrated_model, acc, selected_cols
 
 
 def build_regressor_features(df: pd.DataFrame):
@@ -491,6 +516,10 @@ class NBAPredictor:
             self.reg          = joblib.load(self.models_dir / "regressor.pkl")
             self.reg_features = joblib.load(self.models_dir / "regressor_features.pkl")
             self.snapshot     = joblib.load(self.models_dir / "team_stats_snapshot.pkl")
+            try:
+                self.clf_importances = joblib.load(self.models_dir / "classifier_feature_importances.pkl")
+            except FileNotFoundError:
+                self.clf_importances = np.ones(len(self.clf_features))
             self.models_loaded = True
             print("[NBAPredictor] ✅ Modelos cargados correctamente")
         except FileNotFoundError as e:

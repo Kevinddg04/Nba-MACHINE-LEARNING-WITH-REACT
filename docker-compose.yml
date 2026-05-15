@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=sqlite:///nba.db
+    depends_on:
+      - redis
+    volumes:
+      - ./backend/models:/app/models
+      - ./TeamStatistics.csv:/app/TeamStatistics.csv
+
+  redis:
+    image: "redis:alpine"
+    ports:
+      - "6379:6379"
+
+# Si decides añadir un servicio frontend en el futuro, puedes hacerlo aquí
