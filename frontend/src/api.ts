@@ -1,6 +1,7 @@
 import type { Team, PredictionResult, H2HResult, ModelInfo, SystemMetrics } from './types';
 
-const BASE = import.meta.env.VITE_API_URL || '/api';
+const rawUrl = import.meta.env.VITE_API_URL;
+const BASE = rawUrl ? (rawUrl.endsWith('/api') ? rawUrl : `${rawUrl}/api`) : '/api';
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, options);
