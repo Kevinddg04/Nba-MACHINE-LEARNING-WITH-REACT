@@ -1,7 +1,9 @@
 import type { Team, PredictionResult, H2HResult, ModelInfo, SystemMetrics } from './types';
 
-const rawUrl = import.meta.env.VITE_API_URL;
-const BASE = rawUrl ? (rawUrl.endsWith('/api') ? rawUrl : `${rawUrl}/api`) : '/api';
+const rawBase = import.meta.env.VITE_API_URL || '';
+const hostBase = rawBase.endsWith('/') ? rawBase.slice(0, -1) : rawBase;
+// Prevenir que el frontend intente buscar datos sin la ruta /api obligatoria del servidor
+const BASE = hostBase.endsWith('/api') ? hostBase : (hostBase + '/api');
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, options);

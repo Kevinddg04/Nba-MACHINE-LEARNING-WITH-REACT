@@ -279,8 +279,15 @@ def head_to_head(req: HeadToHeadRequest):
     t2_wins = 0
     
     for i in range(5):
-        s1 = round(t1["expectedTeamScore"] + random.uniform(-12, 12))
-        s2 = round(t2["expectedTeamScore"] + random.uniform(-12, 12))
+        # Aumentamos la varianza (Desviación Típica de 8 puntos) para que la probabilidad estadística
+        # permita resultados sorpresas en los 5 juegos.
+        s1 = int(round(random.gauss(t1["expectedTeamScore"], 9)))
+        s2 = int(round(random.gauss(t2["expectedTeamScore"], 9)))
+        
+        # Eliminar empates
+        if s1 == s2:
+            s1 += 1
+            
         winner_id = req.team1 if s1 > s2 else req.team2
         winner_name = t1["team_name"] if s1 > s2 else t2["team_name"]
         
@@ -290,13 +297,18 @@ def head_to_head(req: HeadToHeadRequest):
             t2_wins += 1
             
         games.append({
-            "game_number": i + 1,
-            "team1_score": s1,
-            "team2_score": s2,
-            "winner": winner_name
+            "game": i + 1,
+            "t1_score": s1,
+            "t2_score": s2,
+            "winner_id": winner_id,
+            "winner_name": winner_name
         })
         
     return {
+        "team1_id": req.team1,
+        "team2_id": req.team2,
+        "team1_name": t1["team_name"],
+        "team2_name": t2["team_name"],
         "team1_wins": t1_wins,
         "team2_wins": t2_wins,
         "series_winner": t1["team_name"] if t1_wins > t2_wins else t2["team_name"],
