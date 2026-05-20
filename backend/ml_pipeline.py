@@ -1,23 +1,17 @@
 """
 ml_pipeline.py
 ==============
-Pipeline completo de Machine Learning para predicción NBA.
-Extraído y organizado desde el notebook de CatBoost.
+Flujo completo de Machine Learning para predicciones de la NBA.
+Adaptado para la automatización diaria en la nube (CatBoost + LightGBM).
 
 Contiene:
-  - Preprocesamiento idéntico al notebook
-  - CatBoostClassifier  → predice WIN / LOSS
-  - CatBoostRegressor   → predice PUNTAJE del equipo
-  - Guardado de modelos en /models/
+  - Preprocesamiento de datos y Feature Engineering defensivo/ofensivo.
+  - Clasificador (CatBoost + LightGBM)  → Predice GANADOR / PERDEDOR
+  - Regresor (CatBoost)                 → Estima el ANOTAJE ESPERADO
+  - Módulos de Calibración de probabilidad de victoria usando la lógica de los puntos.
 
 USO:
-    # Entrenar y guardar modelos:
     python ml_pipeline.py
-
-    # Usar desde Flask (app.py):
-    from ml_pipeline import NBAPredictor
-    predictor = NBAPredictor()
-    result = predictor.predict(team1_id, team2_id, home_team=1)
 """
 
 import pandas as pd
@@ -28,7 +22,7 @@ from pathlib import Path
 from datetime import datetime
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  CONFIGURACIÓN
+#  CONFIGURACIÓN GLOBAL
 # ─────────────────────────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).parent
 PROJECT_ROOT = BASE_DIR.parent
@@ -36,13 +30,10 @@ PROJECT_ROOT = BASE_DIR.parent
 CSV_PATH   = str(PROJECT_ROOT / "TeamStatistics.csv")
 MODELS_DIR = BASE_DIR / "models"
 
-# IDs a eliminar (del notebook original - solo equipos de exhibición/All-Star)
+# IDs ignorados (Partidos de exhibición o All-Star que distorsionan el modelo)
 IDS_A_ELIMINAR = [
     15016, 15018, 50013, 50014
 ]
-
-
-
 
 TEAM_NAMES = {
     1610612738: "Boston Celtics",
@@ -77,18 +68,17 @@ TEAM_NAMES = {
     1610612766: "Charlotte Hornets",
 }
 
-
 # ─────────────────────────────────────────────────────────────────────────────
-#  1. CARGA Y LIMPIEZA (igual que el notebook)
+#  1. CARGA Y LIMPIEZA
 # ─────────────────────────────────────────────────────────────────────────────
 
 def load_and_clean(csv_path: str = CSV_PATH) -> pd.DataFrame:
-    """Carga el CSV y aplica la limpieza del notebook (cells 0-13)."""
-    print("[Pipeline] Cargando dataset...")
+    """Carga el dataset CSV y aplica limpiadores iniciales anti-ruido."""
+    print("[Pipeline] Cargando base de datos histórica de partidos NBA...")
     df = pd.read_csv(csv_path, index_col=0, low_memory=False)
-    print(f"  → {len(df):,} filas cargadas")
+    print(f"  → {len(df):,} registros cargados exitosamente.")
 
-    # Columnas a eliminar (Cell 2)
+    # Columnas irrelevantes para la IA predictiva
     drop_cols = [
         "coachId", "seasonLosses", "seasonWins", "timeoutsRemaining",
         "q1Points", "q2Points", "q3Points", "q4Points",
@@ -101,15 +91,15 @@ def load_and_clean(csv_path: str = CSV_PATH) -> pd.DataFrame:
     ]
     df = df.drop(columns=drop_cols, errors="ignore")
 
-    # Fechas (2015 - Actualidad) - Rango de Oro solicitado por usuario
+    # Restricción Temporal de Entrenamiento (Ignorar eras pasadas irrelevantes para el basket moderno)
     df["gameDateTimeEst"] = pd.to_datetime(
         df["gameDateTimeEst"], errors="coerce", format="mixed", utc=True
     ).dt.normalize()
-    # Permitir partidos hasta finales de 2026 para no filtrar los juegos de ayer
+    # Entrenar desde el 2015 en adelante (La Era de los Triples) hasta 2026/Presente
     df = df[(df["gameDateTimeEst"] >= "2015-01-01") & (df["gameDateTimeEst"] <= "2026-12-31")]
     df = df.sort_values("gameDateTimeEst").reset_index(drop=True)
 
-    # Filtrar IDs inválidos (Cell 12-13)
+    # Limpiar identificadores ficticios o All-Star
     valid_ids = set(df["teamId"].unique()) | set(df["opponentTeamId"].unique())
     df = df[
         df["teamId"].isin(valid_ids) &
@@ -119,35 +109,35 @@ def load_and_clean(csv_path: str = CSV_PATH) -> pd.DataFrame:
         ~(df["teamId"].isin(IDS_A_ELIMINAR) | df["opponentTeamId"].isin(IDS_A_ELIMINAR))
     ].reset_index(drop=True)
 
-    print(f"  → {len(df):,} filas después de limpieza")
+    print(f"  → {len(df):,} registros aceptados tras la exclusión de ruido.")
     return df
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  2. FEATURE ENGINEERING (igual que el notebook)
+#  2. CREACIÓN DE VARIABLES AVANZADAS (FEATURE ENGINEERING)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Aplica el feature engineering completo (cells 14-26)."""
-    print("[Pipeline] Construyendo features...")
+    """Extrae las rachas (streaks), handicaps reales y promedios continuos (rolling)."""
+    print("[Pipeline] Iniciando Ingeniería de Datos Deportivos (Feature Engineering)...")
 
-    # Win como int (Cell 14)
+    # Forzar etiqueta binaria de Victoria (Win)
     df = df.dropna(subset=["win"]).copy()
     df["win"] = df["win"].astype(int)
 
-    # Ordenar por equipo y fecha
+    # Ordenar cronológicamente todo el torneo antes de promediar
     df = df.sort_values(["teamId", "gameDateTimeEst"]).reset_index(drop=True)
 
-    # Win streak (Cell 14)
+    # Racha de victorias en los últimos 5 partidos (Win Streak)
     df["win_streak_5"] = (
         df.groupby("teamId")["win"]
         .transform(lambda x: x.shift(1).rolling(5, min_periods=1).sum())
     )
 
-    # totalPoints_real (Cell 22)
+    # Total de Puntos Reales del Duelo
     df["totalPoints_real"] = df["teamScore"] + df["opponentScore"]
 
-    # Shift de todas las columnas estadísticas (Cell 22 - evitar leakage)
+    # Prevención de Espionaje Temporal (Leakage): Desplazar métricas 1 partido atrás
     shift_cols = [
         "teamScore", "opponentScore",
         "assists", "blocks", "steals",
@@ -160,7 +150,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     shift_cols = [c for c in shift_cols if c in df.columns]
     df[shift_cols] = df.groupby("teamId")[shift_cols].shift(1)
 
-    # Rolling 5 partidos (Cell 22)
+    # Promediadores (Rolling Means) de los 5 juegos previos
     rolling_cols = [
         "teamScore", "opponentScore",
         "assists", "blocks", "steals",
@@ -178,11 +168,11 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         .reset_index(level=0, drop=True)
     )
 
-    # PointDiff y Handicap (Cell 22)
+    # Defectos y Handicaps Promedios
     df["PointDiff"] = df["teamScore"] - df["opponentScore"]
     df["Handicap"]  = df["PointDiff"] * -1
 
-    # Expected scores (Cell 22)
+    # Puntajes Ofensivos Promedio (Expected Scores)
     df["expectedTeamScore"] = df.groupby("teamId")["teamScore"].transform(
         lambda x: x.rolling(5, min_periods=1).mean()
     )
@@ -191,7 +181,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     )
     df["totalPoints"] = df["expectedTeamScore"] + df["expectedOpponentScore"]
 
-    # RealHandicap (Cell 22)
+    # Ventaja Real en la Cancha (Handicap Promedio)
     df["RealHandicap"] = df["teamScore"] - df["opponentScore"]
     df["RealHandicap"] = (
         df.groupby("teamId")["RealHandicap"]
@@ -199,40 +189,39 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         .reset_index(level=0, drop=True)
     )
 
-    # Defensa (rolling 10 del oponente - solicitado por usuario)
+    # Evaluación Defensiva: ¿Cuántos puntos permite este equipo en los últimos 10 juegos?
     df["defensive_rating_r10"] = (
         df.groupby("teamId")["opponentScore"]
         .transform(lambda x: x.shift(1).rolling(10, min_periods=1).mean())
     )
 
-    # Dropear NaN
     df = df.dropna().reset_index(drop=True)
 
-    # Re-calcular win correctamente (Cell 24)
+    # Re-calcular victoria en caso de inconsistencia en CSV original
     correct_win = (df["teamScore"] > df["opponentScore"]).astype(int)
     df.loc[df["win"] != correct_win, "win"] = correct_win
 
-    # Crear gameId único (Cell 19)
+    # Crear Identificador Universal de Partido (Evita que el equipo local/visitante tengan IDs diferentes)
     df["gameId"] = (
         df["gameDateTimeEst"].astype(str) + "_" +
         df[["teamId", "opponentTeamId"]].min(axis=1).astype(str) + "_" +
         df[["teamId", "opponentTeamId"]].max(axis=1).astype(str)
     )
 
-    print(f"  → {len(df):,} filas con features completos")
+    print(f"  → {len(df):,} registros enriquecidos listos para la IA.")
     return df
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  3. ENTRENAMIENTO
+#  3. ENTRENAMIENTO DEL MODELO DE APRENDIZAJE AUTOMÁTICO (MACHINE LEARNING)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_classifier_matchup_data(df: pd.DataFrame):
     """
-    Transforma filas de equipos individuales en filas de DUELOS (Matchups).
-    Genera filas SIMÉTRICAS (2 filas por partido) para evitar el sesgo de localía.
+    Transforma registros estadísticos simples en una batalla 1vs1.
+    Genera filas SIMÉTRICAS A vs B y B vs A para suprimir sesgos de Localía ilusoria.
     """
-    print("[Pipeline] Construyendo Duelos Simétricos A vs B (Anti-Home Bias)...")
+    print("[Clasificador] Construyendo Arquitectura Simétrica de Duelos (Cero Sesgos Localistas)...")
     
     home_df = df[df["home"] == 1].copy()
     away_df = df[df["home"] == 0].copy()
@@ -243,60 +232,57 @@ def build_classifier_matchup_data(df: pd.DataFrame):
     ]
     core_cols = [c for c in core_cols if c in df.columns]
 
-    # Unir Home y Away
     matchup_raw = home_df[["gameId", "gameDateTimeEst", "teamId", "opponentTeamId", "win"] + core_cols].merge(
         away_df[["gameId", "teamId"] + core_cols],
         on="gameId",
         suffixes=("_HOME", "_AWAY")
     )
 
-    # CREAR FILAS SIMÉTRICAS:
-    # Fila 1: Equipo A es Home, Equipo B es Away (home=1)
+    # Perspectiva 1: A es Local, B es Visitante
     f1 = pd.DataFrame()
     f1["gameDateTimeEst"] = matchup_raw["gameDateTimeEst"]
     f1["home"] = 1
-    f1["label_win_A"] = matchup_raw["win"]  # win_HOME
+    f1["label_win_A"] = matchup_raw["win"]  # La victoria del local
     for c in core_cols:
         f1[f"{c}_A"] = matchup_raw[f"{c}_HOME"]
         f1[f"{c}_B"] = matchup_raw[f"{c}_AWAY"]
         f1[f"DIFF_{c}"] = f1[f"{c}_A"] - f1[f"{c}_B"]
 
-    # Fila 2: Equipo A es Away, Equipo B es Home (home=0)
+    # Perspectiva 2: A es Visitante, B es Local (El espejo)
     f2 = pd.DataFrame()
     f2["gameDateTimeEst"] = matchup_raw["gameDateTimeEst"]
     f2["home"] = 0
-    f2["label_win_A"] = 1 - matchup_raw["win"]  # win_AWAY (si el local no gano, gano el visitante)
+    f2["label_win_A"] = 1 - matchup_raw["win"]  # Reflejo inverso de victoria
     for c in core_cols:
         f2[f"{c}_A"] = matchup_raw[f"{c}_AWAY"]
         f2[f"{c}_B"] = matchup_raw[f"{c}_HOME"]
         f2[f"DIFF_{c}"] = f2[f"{c}_A"] - f2[f"{c}_B"]
 
-    # Concatenar para balancear 50/50 la importancia de la localía
+    # Mezclar ambas perspectivas
     matchup = pd.concat([f1, f2], ignore_index=True)
-
-    print(f"  → {len(matchup):,} filas generadas (Simetría aplicada)")
+    print(f"  → {len(matchup):,} escenarios de combate generados y balanceados.")
     return matchup
 
 
 def train_classifier(df: pd.DataFrame):
     """
-    Entrena CatBoostClassifier basado en DUELOS (Matchups).
+    Entrena el motor lógico principal para predecir Qué Equipo Ganará.
+    Utiliza una aleación de CatBoost y LightGBM (Ensemble).
     """
     from catboost import CatBoostClassifier
     from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
     import numpy as np
 
-    # 1. Construir Matchups
     df_model = build_classifier_matchup_data(df)
     
-    # 2. Split Temporal Cronológico (80% Pasado / 20% Más Reciente)
+    # Simular Reto en el Mundo Real: Entrenar con el 80% viejo, adivinar el 20% futuro
     df_model = df_model.sort_values("gameDateTimeEst")
     split_idx = int(len(df_model) * 0.80)
     
     train_data = df_model.iloc[:split_idx]
     test_data  = df_model.iloc[split_idx:]
 
-    # 3. Selección de Features (A, B, Diferencias y Localía)
+    # Aislar unicamente las métricas matemáticas
     X_cols = [c for c in df_model.columns if c.endswith("_A") or c.endswith("_B") or c.startswith("DIFF_") or c == "home"]
     X_cols = [c for c in X_cols if "teamId" not in c and "label" not in c and "home_B" not in c]
     
@@ -307,69 +293,51 @@ def train_classifier(df: pd.DataFrame):
     from ml.feature_selection import select_features_final
     from ml.calibration import calibrate_classifier
     from ml.cross_validation import time_series_cv
-    from catboost import CatBoostClassifier
 
-    # 4. Feature Selection using VIF and SelectKBest
-    print(f"[Classifier] Realizando feature selection (de {len(X_cols)} features)...")
+    print(f"[Clasificador] Exigiendo destilación de las {len(X_cols)} métricas principales...")
     selected_cols = select_features_final(X_train_full, y_train, k=35, vif_threshold=15.0)
-    # Ensure home is always included
+    
+    # La Cancha Local es inquebrantable en NBA
     if "home" not in selected_cols and "home" in X_train_full.columns:
         selected_cols.append("home")
         
     X_train = X_train_full[selected_cols]
     X_test  = X_test_full[selected_cols]
 
-    print(f"[Classifier] Entrenando preseleccionando {len(selected_cols)} features...")
-    print(f"[Classifier] Entrenando con {len(X_train)} partidos / Evaluando con {len(X_test)}")
+    print(f"[Clasificador] Estudiando {len(X_train):,} eventos pasados para dominar el futuro.")
     
-    # Run a quick CV baseline with CatBoost
-    cb_baseline = CatBoostClassifier(iterations=200, depth=6, learning_rate=0.03, verbose=False)
-    cv_results = time_series_cv(cb_baseline, df_model[selected_cols], df_model["label_win_A"], n_splits=5)
-    print(f"[Classifier] Baseline CV Mean Accuracy: {cv_results['mean_accuracy']:.4f} ± {cv_results['std_accuracy']:.4f}")
-
-    # 5. Build unfitted Ensemble
     ensemble = build_ensemble(
         catboost_params={'iterations': 600, 'depth': 6, 'learning_rate': 0.03, 'l2_leaf_reg': 20.0, 'bootstrap_type': 'Bernoulli', 'subsample': 0.7, 'random_seed': 42, 'verbose': False},
         lgbm_params={'n_estimators': 500, 'learning_rate': 0.03, 'max_depth': 6, 'reg_lambda': 10.0, 'subsample': 0.7, 'random_state': 42, 'verbose': -1}
     )
 
-    # 6. Calibración (Platt Scaling) - Esto entrenará el modelo (cv=3 folds)
-    print("[Classifier] Entrenando y Calibrando Ensemble (cv=3) ...")
+    print("[Clasificador] Calibrando porcentajes de victoria (Asignador de Probabilidad) ...")
     calibrated_model = calibrate_classifier(ensemble, X_train, y_train, cv=3)
 
-    # Evaluación
     preds = calibrated_model.predict(X_test)
     acc   = accuracy_score(y_test, preds)
 
-    print(f"\n[Classifier] ✅ Calibrated Ensemble Accuracy: {acc*100:.2f}%")
-    print("\nMatriz de Confusión (Matchup):")
-    print(confusion_matrix(y_test, preds))
-    print("\nReporte de Clasificación:")
+    print(f"\n[Clasificador] ✅ Precisión Oficial del Motor Principal: {acc*100:.2f}%")
+    print("\n[Métricas] Desglose Interno del Cerebro:")
     print(classification_report(y_test, preds))
 
-    # Feature Importance: approximate from CatBoost inside the ensemble
     try:
         cb = ensemble.named_estimators_['catboost']
         feat_imp = cb.get_feature_importance()
     except Exception:
         feat_imp = np.ones(len(selected_cols))
         
-    top_indices = np.argsort(feat_imp)[-5:][::-1]
-    print("\n⭐ TOP 5 FEATURES MÁS IMPORTANTES (basado en CatBoost base):")
-    for idx in top_indices:
-        print(f"  - {selected_cols[idx]}: {feat_imp[idx]:.2f}")
-
     MODELS_DIR.mkdir(exist_ok=True)
     joblib.dump(calibrated_model,  MODELS_DIR / "classifier.pkl")
     joblib.dump(selected_cols, MODELS_DIR / "classifier_features.pkl")
     joblib.dump(feat_imp, MODELS_DIR / "classifier_feature_importances.pkl")
-    print(f"[Classifier] Modelo Matchup Ensemble guardado en {MODELS_DIR}/classifier.pkl")
+    print(f"[Clasificador] Inteligencia artificial guardada exitosamente.")
 
     return calibrated_model, acc, selected_cols
 
 
 def build_regressor_features(df: pd.DataFrame):
-    """Construye features ATT_/DEF_ para el regresor (Cell 20)."""
+    """Crea columnas de Ataque (ATT) y Defensa (DEF) puras para predecir cuántos puntos meterá alguien."""
     dfp = df.copy()
     dfp = dfp.sort_values(["teamId", "gameDateTimeEst"]).reset_index(drop=True)
 
@@ -426,17 +394,17 @@ def build_regressor_features(df: pd.DataFrame):
 
 def train_regressor(df: pd.DataFrame):
     """
-    Entrena CatBoostRegressor (puntaje) — idéntico a Cell 30.
-    Guarda el modelo y retorna (model, mae).
+    Entrena el segundo cerebro (El Matemático de Puntajes).
+    Predice el Spread (Brecha de anotaciones hipotética).
     """
     from catboost import CatBoostRegressor
     from sklearn.metrics import mean_absolute_error
     import numpy as np
 
-    print("\n[Regressor] Construyendo features ATT_/DEF_...")
+    print("\n[Regresor Matemático] Calculando brechas de capacidad de anotación...")
     dfp = build_regressor_features(df)
 
-    # Target: puntaje del próximo partido
+    # Objetivo a predecir (Target): ¿Cuántos puntos anotará en el futuro el equipo examinado?
     df_next = dfp.sort_values(["teamId", "gameDateTimeEst"]).copy()
     df_next["teamScore_next"] = dfp.groupby("teamId")["teamScore"].shift(-1)
     df_next = df_next[["gameId", "teamId", "teamScore_next"]]
@@ -456,31 +424,31 @@ def train_regressor(df: pd.DataFrame):
     X_train, X_test = X.iloc[:split], X.iloc[split:]
     y_train, y_test = y.iloc[:split], y.iloc[split:]
 
-    print(f"[Regressor] Entrenando CatBoostRegressor ({len(X_train):,} train / {len(X_test):,} test)...")
+    print(f"[Regresor Matemático] Memorizando puntajes de la liga ({len(X_train):,} eventos)...")
     model = CatBoostRegressor(
         iterations=1200, depth=6, learning_rate=0.03,
         loss_function="RMSE", verbose=200, random_seed=42,
     )
-    model.fit(X_train, y_train, eval_set=(X_test, y_test), verbose=200)
+    # Por limitaciones de RAM y simplicidad de bitacora, minimizamos los mensajes de carga (verbose) a False
+    model.fit(X_train, y_train, eval_set=(X_test, y_test), verbose=False)
 
     preds = model.predict(X_test)
     mae   = mean_absolute_error(y_test, preds)
     rmse  = np.sqrt(((y_test - preds) ** 2).mean())
-    print(f"[Regressor] ✅ MAE: {mae:.2f} pts | RMSE: {rmse:.2f} pts")
+    print(f"[Regresor Matemático] ✅ Error Absoluto de Estimación de Puntaje (MAE): {mae:.2f} puntos")
 
     MODELS_DIR.mkdir(exist_ok=True)
     joblib.dump(model,        MODELS_DIR / "regressor.pkl")
     joblib.dump(feature_cols, MODELS_DIR / "regressor_features.pkl")
-    print(f"[Regressor] Modelo guardado en {MODELS_DIR}/regressor.pkl")
+    print(f"[Regresor Matemático] Álgebra guardada exitosamente en el disco.")
 
-    # Guardar las últimas stats de cada equipo (para inferencia en tiempo real)
     _save_team_stats_snapshot(df)
 
     return model, mae, feature_cols
 
 
 def _save_team_stats_snapshot(df: pd.DataFrame):
-    """Guarda el último estado de cada equipo para usarlo en predicciones."""
+    """Extrae las fotografías del "Último Minuto" para todos los equipos. La foto más fresca."""
     snapshot = (
         df.sort_values(["teamId", "gameDateTimeEst"])
         .groupby("teamId")
@@ -488,28 +456,22 @@ def _save_team_stats_snapshot(df: pd.DataFrame):
         .reset_index()
     )
     joblib.dump(snapshot, MODELS_DIR / "team_stats_snapshot.pkl")
-    print(f"[Pipeline] Snapshot de {len(snapshot)} equipos guardado.")
+    print(f"[Pipeline] Memoria Reciente fotográfica capturada para {len(snapshot)} equipos. Guardado Exitoso.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  4. CLASE PREDICTOR (para Flask)
+#  4. SERVICIO PREDICTOR EN VIVO (Para Interfaz de React & API)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class NBAPredictor:
-    """
-    Interfaz de predicción para Flask.
-    Carga los modelos entrenados y expone predict().
-
-    Uso en app.py:
-        predictor = NBAPredictor()
-        result = predictor.predict(team1_id, team2_id, home_team=1)
-    """
+    """Conserje de la Inteligencia Artificial. Responde las peticiones provenientes del Backend."""
 
     def __init__(self, models_dir: str = "models"):
         self.models_dir = Path(models_dir)
         self._load_models()
 
     def _load_models(self):
+        """Intenta extraer los cerebros artificiales del disco a la memoria RAM."""
         try:
             self.clf          = joblib.load(self.models_dir / "classifier.pkl")
             self.clf_features = joblib.load(self.models_dir / "classifier_features.pkl")
@@ -521,43 +483,40 @@ class NBAPredictor:
             except FileNotFoundError:
                 self.clf_importances = np.ones(len(self.clf_features))
             self.models_loaded = True
-            print("[NBAPredictor] ✅ Modelos cargados correctamente")
+            print("[Gestor Inteligente] ✅ Inteligencia recargada a la memoria con éxito. Estamos Listos.")
         except FileNotFoundError as e:
             self.models_loaded = False
-            print(f"[NBAPredictor] ⚠️ Modelos no encontrados: {e}")
-            print("  → Ejecuta: python ml_pipeline.py  para entrenar primero")
+            print(f"[Gestor Inteligente] ⚠️ Los Modelos Artificiales aún no existen u ocurrió un error: {e}")
+            print("  → Permite que el sistema complete automáticamente su primer aprendizaje diario.")
 
     def _get_team_row(self, team_id: int) -> pd.Series:
-        """Obtiene las últimas stats registradas de un equipo."""
+        """Obtiene la información fotográfica mental requerida para predecir a un equipo equis."""
         row = self.snapshot[self.snapshot["teamId"] == team_id]
         if len(row) == 0:
-            raise ValueError(f"Team ID {team_id} no encontrado en el snapshot.")
+            raise ValueError(f"Equipo Numérico {team_id} no pudo ser encontrado en los registros.")
         return row.iloc[0]
 
     def predict(self, team1_id: int, team2_id: int, home_team: str = "team1"):
+        """Deduce el ganador absoluto comparando las matemáticas de T1 contra las matemáticas de T2."""
         if not self.models_loaded:
-            return {"error": "Modelos no cargados."}
+            return {"error": "Cerebro Crítico no cargado aún. Permite que entrene primero."}
 
-        # 1. Obtener stats de ambos equipos
         try:
             t1_stats = self._get_team_row(team1_id).to_dict()
             t2_stats = self._get_team_row(team2_id).to_dict()
         except ValueError as e:
             return {"error": str(e)}
 
-        # 2. Configurar Matchup A vs B (A es el que comparamos contra B)
-        # El modelo fue entrenado balanceado (A puede ser Local o Visitante)
         if home_team == "team1":
             stats_A, stats_B = t1_stats, t2_stats
             is_home_A = 1
         elif home_team == "team2":
             stats_A, stats_B = t2_stats, t1_stats
-            is_home_A = 1 # t2 es el local
+            is_home_A = 1
         else:
             stats_A, stats_B = t1_stats, t2_stats
-            is_home_A = 0 # Neutral
+            is_home_A = 0 # Cancha Neutral
 
-        # Construir fila para el modelo
         row = {"home": is_home_A}
         core_cols = ["expectedTeamScore", "defensive_rating_r10", "win_streak_5", "RealHandicap", "totalPoints"]
         for f in core_cols:
@@ -567,36 +526,27 @@ class NBAPredictor:
 
         X_matchup = pd.DataFrame([row])[self.clf_features]
 
-        # 3. Lógica de Realismo NBA (Basado en datos históricos de 146k partidos)
-        # a) Probabilidad bruta del clasificador
+        # Aplicación estricta de la Realidad Deportiva (Realism Scaling)
         raw_prob_A = float(self.clf.predict_proba(X_matchup)[0][1])
 
-        # b) Margen esperado del regresor (Spread)
-        # Usamos el spread para 'anclar' la probabilidad a la realidad competitiva.
         try:
             exp_pts_A = float(self.reg.predict(X_matchup)[0])
-            # Estimación simple del margen relativo
-            # (El modelo reg estima puntos de A dado el oponente B)
             current_opp_avg = stats_B.get("expectedTeamScore", 110)
             projected_margin = exp_pts_A - current_opp_avg
             
-            # Calibración Logística NBA: 
-            # Una ventaja de +10 suele ser 85-88% de victoria en la vida real.
+            # Margen Analítico: +10 puntos previstos = Fuerte Anclaje al 85% de Victoria Final.
             spread_prob = 1 / (1 + np.exp(-0.135 * projected_margin))
             
-            # Ensamble Certero: Combinamos la fuerza estadística con la lógica de puntos.
+            # Equilibrio Armónico: 60% Análisis Técnico vs 40% Sensatez de Anotación
             final_prob_A = (raw_prob_A * 0.6) + (spread_prob * 0.4)
-            
-            # Cap de Realismo: Nadie gana el 100% en la NBA antes de jugar.
+            # Acotado ético para proteger contra adivinanzas mágicas del 100% que faltan al respeto a la liga
             final_prob_A = np.clip(final_prob_A, 0.05, 0.95)
         except Exception:
             final_prob_A = np.clip(raw_prob_A, 0.1, 0.9)
 
-        team1_name = TEAM_NAMES.get(team1_id, f"Team {team1_id}")
-        team2_name = TEAM_NAMES.get(team2_id, f"Team {team2_id}")
+        team1_name = TEAM_NAMES.get(team1_id, f"Equipo {team1_id}")
+        team2_name = TEAM_NAMES.get(team2_id, f"Equipo {team2_id}")
 
-        # La respuesta siempre devuelve Team 1 vs Team 2
-        # Si stats_A era team1:
         if stats_A["teamId"] == team1_id:
             prob1 = final_prob_A
         else:
@@ -609,7 +559,7 @@ class NBAPredictor:
             "win_probability": round(max(prob1, prob2) * 100, 1),
             "team1": {"name": team1_name, "probability": round(prob1 * 100, 1)},
             "team2": {"name": team2_name, "probability": round(prob2 * 100, 1)},
-            "model_info": "Matchup-Aware A/B Classifier + NBA Realism Calibration",
+            "model_info": "Clasificador Doble Avanzado + Calibración Práctica de Cancha 2.0",
             "details": {
                 "t1_streak": t1_stats.get("win_streak_5", 0),
                 "t2_streak": t2_stats.get("win_streak_5", 0),
@@ -618,11 +568,11 @@ class NBAPredictor:
         }
 
     def get_team_stats(self, team_id: int) -> dict:
-        """Retorna las estadísticas recientes de un equipo."""
+        """Sintetiza la ficha de un equipo demandada por los standings del Frontend."""
         row = self._get_team_row(team_id)
         return {
             "team_id": team_id,
-            "team_name": TEAM_NAMES.get(team_id, f"Team {team_id}"),
+            "team_name": TEAM_NAMES.get(team_id, f"Equipo {team_id}"),
             "expectedTeamScore": round(float(row.get("expectedTeamScore", 0)), 1),
             "expectedOpponentScore": round(float(row.get("expectedOpponentScore", 0)), 1),
             "win_streak_5": round(float(row.get("win_streak_5", 0)), 1),
@@ -637,41 +587,41 @@ class NBAPredictor:
         }
 
     def get_all_teams(self) -> list:
-        """Lista todos los equipos disponibles en el snapshot."""
+        """Devuelve el registro oficial para encartar en la página web."""
         result = []
         for _, row in self.snapshot.iterrows():
             tid = int(row["teamId"])
             result.append({
                 "team_id": tid,
-                "team_name": TEAM_NAMES.get(tid, f"Team {tid}"),
+                "team_name": TEAM_NAMES.get(tid, f"Equipo {tid}"),
             })
         return sorted(result, key=lambda x: x["team_name"])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  5. ENTRY POINT — entrenar y guardar todo
+#  5. GATILLO DE ENTRENAMIENTO ESTRELLA
 # ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    print(f"\n{'='*60}")
-    print(f"  NBA ML Pipeline — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    print(f"{'='*60}\n")
+    print(f"\n{'='*75}")
+    print(f"  🧠 NBA Inteligencia Artificial (Retención Diaria) — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print(f"{'='*75}\n")
 
-    # 1. Cargar y limpiar datos
+    # 1. Absorber Historias
     df_raw = load_and_clean(CSV_PATH)
 
-    # 2. Feature engineering
+    # 2. Ingeniería Computacional de Atributos Deportivos
     df_feat = build_features(df_raw)
 
-    # 3. Entrenar clasificador (win/loss)
+    # 3. Adiestrar Instinto de Victoria o Derrota
     clf, acc, clf_feats = train_classifier(df_feat)
 
-    # 4. Entrenar regresor (puntaje)
+    # 4. Adiestrar Perfección de la Aguja Anotadora
     reg, mae, reg_feats = train_regressor(df_feat)
 
-    print(f"\n{'='*60}")
-    print(f"  ENTRENAMIENTO COMPLETO")
-    print(f"  Clasificador Accuracy : {acc*100:.2f}%")
-    print(f"  Regresor MAE          : {mae:.2f} puntos")
-    print(f"  Modelos en            : {MODELS_DIR}/")
-    print(f"{'='*60}\n")
+    print(f"\n{'='*65}")
+    print(f"  🏁 CUBÍCULO DE ENTRENAMIENTO CONCLUIDO CON ÉXITO")
+    print(f"  Aciertos Oficiales Post-Calibración : {acc*100:.2f}% de Fidelidad")
+    print(f"  Incertidumbre Absoluta General      : {mae:.2f} Puntos (MAE)")
+    print(f"  Modelos Protegidos En Bóveda       : {MODELS_DIR}/")
+    print(f"{'='*65}\n")

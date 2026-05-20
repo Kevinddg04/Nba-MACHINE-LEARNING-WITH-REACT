@@ -103,41 +103,66 @@ async def pydantic_validation_exception_handler(request: Request, exc: Validatio
     return JSONResponse(status_code=422, content={"error": msg})
 
 
-# --- Tareas de Fondo ---
+# --- Tareas de Fondo en Segundo Plano ---
 def run_update_pipeline():
-    """Ejecuta el ML Pipeline de fondo."""
-    logger.info("Iniciando Pipeline de ML en segundo plano...")
+    """Ejecuta el ciclo de entrenamiento de Machine Learning en segundo plano."""
+    logger.info("Iniciando Entrenamiento de IA en segundo plano...")
     try:
+        # 1. Traer datos
+        subprocess.run(["python", "kaggle_fetcher.py"], check=True)
+        # 2. Entrenar
         subprocess.run(["python", "ml_pipeline.py"], check=True)
+        # 3. Cargar a la RAM
         predictor._load_models()
-        logger.info("Pipeline ML Completado y modelos recargados.")
+        logger.info("✅ Pipeline de Machine Learning Finalizado y recargado.")
     except Exception as e:
-        logger.error(f"Fallo en actualización de pipeline: {e}")
+        logger.error(f"❌ Falló la actualización obligatoria del modelo: {e}")
 
 def keep_alive_ping():
-    """Autoping."""
+    """Auto-ping para mantener el servidor vivo."""
     try:
-        logger.debug("Auto-ping ejecutándose...")
+        logger.debug("Auto-ping de servidor ejecutándose...")
         http_requests.get(f"{SELF_URL}/health", timeout=5)
     except Exception as e:
-        logger.warning(f"Fallo auto-ping: {e}")
+        logger.warning(f"Fallo en el auto-ping de vida: {e}")
 
 import asyncio
 @app.on_event("startup")
 async def start_keep_alive():
+    """Evento disparado al momento de encender el servidor."""
     if os.environ.get("PORT"):
         asyncio.create_task(keep_alive_loop())
+    
+    # Arrancar el rastreador/entrenador eterno de Kaggle (cada 24h)
+    asyncio.create_task(daily_learning_loop())
+
+async def daily_learning_loop():
+    """Bucle eterno que descarga datos frescos de Kaggle y re-entrena a la IA cada 24 horas."""
+    while True:
+        # Duerme por 24 horas exactas (86,400 segundos)
+        await asyncio.sleep(86400)
+        logger.info("Iniciando RUTINA DIARIA AUTOMÁTICA de Aprendizaje (Extracción Kaggle + Entrenamiento)...")
+        try:
+            # 1. Ejecutamos el agente de Kaggle en un subproceso para cuidar la memoria
+            subprocess.run(["python", "kaggle_fetcher.py"], check=True)
+            # 2. Ejecutamos el entrenamiento masivo
+            subprocess.run(["python", "ml_pipeline.py"], check=True)
+            # 3. Recargamos la inteligencia en el predictos actual
+            predictor._load_models()
+            logger.info("✅ Rutina Diaria de Aprendizaje Completada con Éxito. ¡El modelo es más inteligente ahora!")
+        except Exception as e:
+            logger.error(f"❌ Falló trágicamente el aprendizaje diario automático: {e}")
 
 async def keep_alive_loop():
     import httpx
     async with httpx.AsyncClient() as client:
         while True:
-            await asyncio.sleep(840)  # 14 minutos (evita sleep de 15m en Render)
+            await asyncio.sleep(840)  # 14 minutos (evita suspensión de 15m en Render)
             try:
-                logger.debug("Auto-ping loop ejecutándose...")
                 await client.get(f"{SELF_URL}/health", timeout=10.0)
             except Exception as e:
-                logger.warning(f"Fallo auto-ping loop: {e}")
+                pass
+
 
 
 # --- Endpoints API ---
