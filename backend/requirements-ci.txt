@@ -1,0 +1,16 @@
+# requirements-ci.txt
+# Dependencias mínimas para correr los tests en GitHub Actions (CI).
+# No incluye CatBoost ni LightGBM para evitar timeouts por compilación.
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+httpx>=0.25.0
+pydantic>=2.0.0
+sqlalchemy>=2.0.0
+pandas>=2.0.0
+numpy>=1.24.0
+joblib>=1.3.0
+scikit-learn>=1.3.0
+requests>=2.31.0
+redis>=5.0.0
+pytest
+pytest-anyio
