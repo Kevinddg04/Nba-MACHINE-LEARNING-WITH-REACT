@@ -64,7 +64,15 @@ jobs:
         cd backend
         python -m pytest tests/test_api.py tests/test_data_quality.py -v --tb=short \
           --ignore=tests/test_ml_pipeline.py \
-          -p no:warnings
+          -p no:warnings > pytest_output.txt 2>&1 || true
+        cat pytest_output.txt
+        
+        if grep -q "FAILED\|ERROR\|Traceback\|ImportError" pytest_output.txt; then
+          echo "::error::--- DETALLE DEL FALLO EN PYTEST ---"
+          tail -n 30 pytest_output.txt | while read line; do echo "::error::$line"; done
+          exit 1
+        fi
+
       env:
         KAGGLE_API_TOKEN: "ci-stub-token"
         PORT: ""
