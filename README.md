@@ -4,7 +4,7 @@
 
 Desarrollado como proyecto académico de Desarrollo Web 2025.
 
-**Autores**: Kevin Diaz · Mauricio Carillo · Joseph Charris
+**Autor**: Kevin Diaz
 
 ---
 
