@@ -133,9 +133,8 @@ async def start_keep_alive():
     """Evento disparado al momento de encender el servidor."""
     if os.environ.get("PORT"):
         asyncio.create_task(keep_alive_loop())
-    
-    # Arrancar el rastreador/entrenador eterno de Kaggle (cada 24h)
-    asyncio.create_task(daily_learning_loop())
+        # Arrancar el rastreador/entrenador eterno de Kaggle solo en Vercel/Render
+        asyncio.create_task(daily_learning_loop())
 
 async def daily_learning_loop():
     """Bucle eterno que descarga datos frescos de Kaggle y re-entrena a la IA cada 24 horas."""
