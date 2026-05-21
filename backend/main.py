@@ -51,7 +51,8 @@ app.add_middleware(
 predictor = NBAPredictor()
 
 # --- Configuración Constantes ---
-PORT = int(os.environ.get("PORT", 8000))
+raw_port = os.environ.get("PORT")
+PORT = int(raw_port) if raw_port else 8000
 SELF_URL = os.environ.get("SELF_URL", f"http://localhost:{PORT}")
 ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "super-secret-local-key")
 
