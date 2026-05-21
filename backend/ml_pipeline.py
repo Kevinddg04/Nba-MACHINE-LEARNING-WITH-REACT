@@ -468,7 +468,11 @@ class NBAPredictor:
 
     def __init__(self, models_dir: str = "models"):
         self.models_dir = Path(models_dir)
-        self._load_models()
+        if os.environ.get("CI", "false").lower() == "true":
+            self.models_loaded = False
+            print("[Gestor Inteligente] ⚠️ Saltando carga de modelos físicos por entorno CI (GitHub Actions).")
+        else:
+            self._load_models()
 
     def _load_models(self):
         """Intenta extraer los cerebros artificiales del disco a la memoria RAM."""
