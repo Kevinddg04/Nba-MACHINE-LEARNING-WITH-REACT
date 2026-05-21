@@ -2,7 +2,7 @@
 
 **Predictor de resultados NBA basado en Machine Learning** usando CatBoost con matchups simétricos para eliminar el sesgo de localía.
 
-Desarrollado como proyecto académico de Desarrollo Web 2025.
+Desarrollado como proyecto académico de Desarrollo Web 2026.
 
 **Autor**: Kevin Diaz
 
