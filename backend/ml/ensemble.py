@@ -1,44 +1,43 @@
 """
 ensemble.py
 ===========
-Builds an ensemble classifier incorporating CatBoost, LightGBM, and Ridge.
-VotingClassifier uses soft voting (probability averaging).
+Construye el ensamble de clasificadores: CatBoost, LightGBM y Regresion Logistica.
+Usa VotingClassifier con votacion suave (promedio de probabilidades).
 """
 from sklearn.ensemble import VotingClassifier
 from sklearn.linear_model import RidgeClassifierCV
 from config.logging_config import get_logger
-from catboost import CatBoostClassifier
 
 logger = get_logger(__name__)
 
 def build_ensemble(catboost_params, lgbm_params):
     """
-    Constructs a VotingClassifier with 3 base estimators.
-    Requires lightgbm to be installed.
+    Construye un VotingClassifier con 3 estimadores base.
+    Los imports pesados (CatBoost, LightGBM) son lazy para no crashear en CI.
     """
-    logger.info("Construyendo Ensemble (CatBoost + LightGBM + Ridge)...")
+    logger.info("Construyendo Ensemble (CatBoost + LightGBM + LogisticRegression)...")
     
+    try:
+        from catboost import CatBoostClassifier
+    except ImportError:
+        raise ImportError("CatBoost no está instalado. Ejecuta: pip install catboost")
+        
     try:
         from lightgbm import LGBMClassifier
     except ImportError:
-        logger.error("LightGBM no está instalado. Ejecuta: pip install lightgbm")
-        raise
+        raise ImportError("LightGBM no está instalado. Ejecuta: pip install lightgbm")
         
-    # 1. CatBoost (Weight: 50%)
+    # 1. CatBoost (Peso: 50%)
     cb_model = CatBoostClassifier(**catboost_params)
     
-    # 2. LightGBM (Weight: 30%)
+    # 2. LightGBM (Peso: 30%) 
     lgbm_model = LGBMClassifier(**lgbm_params)
     
-    # 3. Ridge (Weight: 20%) - Good for linear patterns and regularization
-    # RidgeClassifier doesn't natively support predict_proba, but we can wrap it or
-    # CalibratedClassifierCV does it automatically in soft voting sometimes.
-    # Actually, RidgeClassifier doesn't output probas. Let's use LogisticRegression 
-    # with L2 penalty instead since it gives probabilities naturally.
+    # 3. Regresión Logística (Peso: 20%) — Captura patrones lineales con probabilidades nativas
     from sklearn.linear_model import LogisticRegression
     ridge_proxy = LogisticRegression(penalty='l2', C=0.1, solver='lbfgs', max_iter=1000)
     
-    # Voting Classifier
+    # Ensamble por Votación Suave
     ensemble = VotingClassifier(
         estimators=[
             ('catboost', cb_model),
