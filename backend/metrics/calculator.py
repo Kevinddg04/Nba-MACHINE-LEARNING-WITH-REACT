@@ -68,6 +68,7 @@ def get_last_predictions(limit=10):
                 "date": p.timestamp.isoformat() if p.timestamp else None,
                 "team1_id": p.team1_id,
                 "team2_id": p.team2_id,
+                "home_team": p.home_team,
                 "predicted_winner": p.predicted_winner_id,
                 "predicted_prob": round(p.predicted_winner_prob, 4),
                 "actual_winner": p.actual_winner_id,

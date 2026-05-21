@@ -67,15 +67,16 @@ def get_db():
 def save_prediction_db(db, t1: int, t2: int, home: str, result: dict):
     """Guarda a DB de manera síncrona/segura."""
     try:
-        import json
+        winner_id = t1 if result["prediction"] == result["team1"]["name"] else t2
+        prob = result["win_probability"] / 100.0
+        
         log = PredictionLog(
             team1_id=t1,
             team2_id=t2,
             home_team=home,
-            predicted_winner=result["prediction"],
-            win_probability=result["win_probability"],
-            model_version=result.get("model_version", "2.0"),
-            metadata_json=json.dumps(result.get("details", {}))
+            predicted_winner_id=winner_id,
+            predicted_winner_prob=prob,
+            model_version=result.get("model_version", "2.0")
         )
         db.add(log)
         db.commit()
@@ -336,23 +337,23 @@ def model_info():
     }
 
 @app.get("/api/metrics")
-def get_metrics(limit: int = 50, db = Depends(get_db)):
+def get_metrics(limit: int = 50):
     """Métricas de aciertos en la DB y logs recientes."""
-    hr = calculate_hit_rate(db)
-    logs = get_last_predictions(db, limit)
+    hr = calculate_hit_rate()
+    logs = get_last_predictions(limit)
     
     history = []
     for l in logs:
         history.append({
-            "id": l.id,
-            "team1": TEAM_NAMES.get(l.team1_id, str(l.team1_id)),
-            "team2": TEAM_NAMES.get(l.team2_id, str(l.team2_id)),
-            "home": l.home_team,
-            "predicted": l.predicted_winner,
-            "prob": l.win_probability,
-            "actual_winner": l.actual_winner,
-            "correct": l.is_correct,
-            "date": l.created_at.isoformat()
+            "id": l["id"],
+            "team1": TEAM_NAMES.get(l["team1_id"], str(l["team1_id"])),
+            "team2": TEAM_NAMES.get(l["team2_id"], str(l["team2_id"])),
+            "home": l.get("home_team", "N/A"),
+            "predicted": TEAM_NAMES.get(l["predicted_winner"], str(l["predicted_winner"])),
+            "prob": l["predicted_prob"] * 100,
+            "actual_winner": l.get("actual_winner"),
+            "correct": l.get("correct"),
+            "date": l["date"]
         })
         
     return {
