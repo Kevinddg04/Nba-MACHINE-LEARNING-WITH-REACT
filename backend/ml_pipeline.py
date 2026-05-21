@@ -484,7 +484,7 @@ class NBAPredictor:
                 self.clf_importances = np.ones(len(self.clf_features))
             self.models_loaded = True
             print("[Gestor Inteligente] ✅ Inteligencia recargada a la memoria con éxito. Estamos Listos.")
-        except FileNotFoundError as e:
+        except Exception as e:
             self.models_loaded = False
             print(f"[Gestor Inteligente] ⚠️ Los Modelos Artificiales aún no existen u ocurrió un error: {e}")
             print("  → Permite que el sistema complete automáticamente su primer aprendizaje diario.")
